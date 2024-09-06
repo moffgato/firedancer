@@ -28,13 +28,15 @@
 
 #define NET_IN_IDX      0
 #define VOTER_IN_IDX    1
-#define SIGN_IN_IDX     2
+#define RESTART_IN_IDX  2
+#define SIGN_IN_IDX     3
 
 #define SHRED_OUT_IDX   0
 #define REPAIR_OUT_IDX  1
 #define DEDUP_OUT_IDX   2
 #define SIGN_OUT_IDX    3
 #define VOTER_OUT_IDX   4
+#define RESTART_OUT_IDX 5
 
 #define CONTACT_INFO_PUBLISH_TIME_NS ((long)5e9)
 
@@ -120,6 +122,20 @@ struct fd_gossip_tile_ctx {
   ulong       dedup_out_wmark;
   ulong       dedup_out_chunk;
 
+  fd_wksp_t * restart_in_mem;
+  ulong       restart_in_chunk0;
+  ulong       restart_in_wmark;
+
+  fd_frag_meta_t * restart_out_mcache;
+  ulong *          restart_out_sync;
+  ulong            restart_out_depth;
+  ulong            restart_out_seq;
+
+  fd_wksp_t * restart_out_mem;
+  ulong       restart_out_chunk0;
+  ulong       restart_out_wmark;
+  ulong       restart_out_chunk;
+
   fd_wksp_t * replay_in_mem;
   ulong       replay_in_chunk0;
   ulong       replay_in_wmark;
@@ -163,6 +179,9 @@ struct fd_gossip_tile_ctx {
 
   ulong replay_vote_txn_sz;
   uchar replay_vote_txn [ FD_TXN_MTU ];
+
+  ulong restart_msg_sz;
+  uchar restart_msg [ 128 + 8192 ];
 };
 typedef struct fd_gossip_tile_ctx fd_gossip_tile_ctx_t;
 
@@ -279,7 +298,21 @@ static void
 gossip_deliver_fun( fd_crds_data_t * data, void * arg ) {
   fd_gossip_tile_ctx_t * ctx = (fd_gossip_tile_ctx_t *)arg;
 
-  if( fd_crds_data_is_vote( data ) ) {
+  if( fd_crds_data_is_restart_last_voted_fork_slots( data ) ) {
+    ulong struct_len = sizeof( fd_gossip_restart_last_voted_fork_slots_t );
+    ulong bitmap_len = data->inner.restart_last_voted_fork_slots.offsets.inner.raw_offsets.offsets.bits.bits_len;
+    uchar * bitmap   = data->inner.restart_last_voted_fork_slots.offsets.inner.raw_offsets.offsets.bits.bits;
+    FD_TEST( data->inner.restart_last_voted_fork_slots.offsets.discriminant==fd_restart_slots_offsets_enum_raw_offsets );
+
+    /* Send fd_gossip_restart_last_voted_fork_slots_t and char bitmap[bits_len] through the link */
+    uchar * last_vote_msg_ = fd_chunk_to_laddr( ctx->restart_out_mem, ctx->restart_out_chunk );
+    memcpy( last_vote_msg_, &data->inner.restart_last_voted_fork_slots, struct_len );
+    memcpy( last_vote_msg_ + struct_len, bitmap, bitmap_len );
+    fd_mcache_publish( ctx->restart_out_mcache, ctx->restart_out_depth, ctx->restart_out_seq, 1UL, ctx->restart_out_chunk,
+      struct_len + bitmap_len, 0UL, 0, 0 );
+    ctx->restart_out_seq   = fd_seq_inc( ctx->restart_out_seq, 1UL );
+    ctx->restart_out_chunk = fd_dcache_compact_next( ctx->restart_out_chunk, struct_len + bitmap_len, ctx->restart_out_chunk0, ctx->restart_out_wmark );
+  } else if( fd_crds_data_is_vote( data ) ) {
     fd_gossip_vote_t const * gossip_vote = &data->inner.vote;
     if( verify_vote_txn( gossip_vote ) != 0 ) {
       return;
@@ -343,7 +376,7 @@ before_frag( void * _ctx        FD_PARAM_UNUSED,
              ulong  seq         FD_PARAM_UNUSED,
              ulong  sig,
              int *  opt_filter ) {
-  if( in_idx != VOTER_IN_IDX && fd_disco_netmux_sig_proto( sig ) != DST_PROTO_GOSSIP) {
+  if( in_idx != VOTER_IN_IDX && in_idx != RESTART_IN_IDX && fd_disco_netmux_sig_proto( sig ) != DST_PROTO_GOSSIP) {
     *opt_filter = 1;
     return;
   }
@@ -358,6 +391,13 @@ during_frag( void * _ctx,
              ulong  sz,
              int *  opt_filter ) {
   fd_gossip_tile_ctx_t * ctx = (fd_gossip_tile_ctx_t *)_ctx;
+
+  if( in_idx == RESTART_IN_IDX ) {
+    /* TODO: check sz */
+    ctx->restart_msg_sz = sz;
+    memcpy( ctx->restart_msg, fd_chunk_to_laddr( ctx->restart_in_mem, chunk ), sz );
+    return;
+  }
 
   if ( in_idx == VOTER_IN_IDX ) {
     if( FD_UNLIKELY( chunk<ctx->replay_in_chunk0 || chunk>ctx->replay_in_wmark || sz>USHORT_MAX ) ) {
@@ -397,6 +437,18 @@ after_frag( void *             _ctx,
             int *              opt_filter FD_PARAM_UNUSED,
             fd_mux_context_t * mux ) {
   fd_gossip_tile_ctx_t * ctx = (fd_gossip_tile_ctx_t *)_ctx;
+
+  if ( in_idx == RESTART_IN_IDX ) {
+    fd_crds_data_t echo_msg;
+    echo_msg.discriminant = fd_crds_data_enum_restart_last_voted_fork_slots;
+    memcpy( &echo_msg.inner.restart_last_voted_fork_slots, ctx->restart_msg, sizeof(fd_gossip_restart_last_voted_fork_slots_t) );
+    echo_msg.inner.restart_last_voted_fork_slots.offsets.inner.raw_offsets.offsets.bits.bits = ctx->restart_msg + sizeof(fd_gossip_restart_last_voted_fork_slots_t);
+
+    FD_TEST( fd_gossip_push_value( ctx->gossip, &echo_msg, NULL ) == 0 );
+
+    FD_LOG_NOTICE(( "gossip sends the wen-restart message: struct=%luB, bitmap=%luB", sizeof(fd_gossip_restart_last_voted_fork_slots_t), ctx->restart_msg_sz - sizeof(fd_gossip_restart_last_voted_fork_slots_t) ));
+    return;
+  }
 
   if ( in_idx == VOTER_IN_IDX ) {
     fd_crds_data_t vote_txn_crds;
@@ -569,20 +621,22 @@ static void
 unprivileged_init( fd_topo_t *      topo,
                    fd_topo_tile_t * tile,
                    void *           scratch ) {
-  if( FD_UNLIKELY( tile->in_cnt != 3UL ||
-                   strcmp( topo->links[ tile->in_link_id[ NET_IN_IDX   ] ].name, "net_gossip" )   ||
-                   strcmp( topo->links[ tile->in_link_id[ VOTER_IN_IDX ] ].name, "voter_gossip" ) ||
-                   strcmp( topo->links[ tile->in_link_id[ SIGN_IN_IDX  ] ].name, "sign_gossip" ) ) ) {
+  if( FD_UNLIKELY( tile->in_cnt != 4UL ||
+                   strcmp( topo->links[ tile->in_link_id[ NET_IN_IDX   ] ].name,   "net_gossip" )   ||
+                   strcmp( topo->links[ tile->in_link_id[ VOTER_IN_IDX ] ].name,   "voter_gossip" ) ||
+                   strcmp( topo->links[ tile->in_link_id[ RESTART_IN_IDX ] ].name, "restart_goss" ) ||
+                   strcmp( topo->links[ tile->in_link_id[ SIGN_IN_IDX  ] ].name,   "sign_gossip" ) ) ) {
     FD_LOG_ERR(( "gossip tile has none or unexpected input links %lu %s %s",
                  tile->in_cnt, topo->links[ tile->in_link_id[ 0 ] ].name, topo->links[ tile->in_link_id[ 1 ] ].name ));
   }
 
-  if( FD_UNLIKELY( tile->out_cnt != 5 ||
-                   strcmp( topo->links[ tile->out_link_id[ SHRED_OUT_IDX  ] ].name, "crds_shred" )    ||
-                   strcmp( topo->links[ tile->out_link_id[ REPAIR_OUT_IDX ] ].name, "gossip_repai" )  ||
-                   strcmp( topo->links[ tile->out_link_id[ DEDUP_OUT_IDX  ] ].name, "gossip_dedup" )  ||
-                   strcmp( topo->links[ tile->out_link_id[ SIGN_OUT_IDX   ] ].name, "gossip_sign" )   ||
-                   strcmp( topo->links[ tile->out_link_id[ VOTER_OUT_IDX  ] ].name, "gossip_voter" ) ) ) {
+  if( FD_UNLIKELY( tile->out_cnt != 6UL ||
+                   strcmp( topo->links[ tile->out_link_id[ SHRED_OUT_IDX  ] ].name,   "crds_shred" )    ||
+                   strcmp( topo->links[ tile->out_link_id[ REPAIR_OUT_IDX ] ].name,   "gossip_repai" )  ||
+                   strcmp( topo->links[ tile->out_link_id[ DEDUP_OUT_IDX  ] ].name,   "gossip_dedup" )  ||
+                   strcmp( topo->links[ tile->out_link_id[ SIGN_OUT_IDX   ] ].name,   "gossip_sign" )   ||
+                   strcmp( topo->links[ tile->out_link_id[ VOTER_OUT_IDX  ] ].name,   "gossip_voter" )  ||
+                   strcmp( topo->links[ tile->out_link_id[ RESTART_OUT_IDX  ] ].name, "gossip_resta" ) ) ) {
     FD_LOG_ERR(( "gossip tile has none or unexpected output links %lu %s %s",
                  tile->out_cnt, topo->links[ tile->out_link_id[ 0 ] ].name, topo->links[ tile->out_link_id[ 1 ] ].name ));
   }
@@ -743,6 +797,22 @@ unprivileged_init( fd_topo_t *      topo,
   ctx->voter_contact_out_chunk0      = fd_dcache_compact_chunk0( ctx->voter_contact_out_mem, voter_out->dcache );
   ctx->voter_contact_out_wmark       = fd_dcache_compact_wmark ( ctx->voter_contact_out_mem, voter_out->dcache, voter_out->mtu );
   ctx->voter_contact_out_chunk       = ctx->voter_contact_out_chunk0;
+
+  /* Set up crds restart messages input/output to the replay tile  */
+  fd_topo_link_t * restart_in = &topo->links[ tile->in_link_id[ RESTART_IN_IDX ] ];
+  ctx->restart_in_mem    = topo->workspaces[ topo->objs[ restart_in->dcache_obj_id ].wksp_id ].wksp;
+  ctx->restart_in_chunk0 = fd_dcache_compact_chunk0( ctx->restart_in_mem, restart_in->dcache );
+  ctx->restart_in_wmark  = fd_dcache_compact_wmark( ctx->restart_in_mem, restart_in->dcache, restart_in->mtu );
+
+  fd_topo_link_t * restart_out = &topo->links[ tile->out_link_id[ RESTART_OUT_IDX ] ];
+  ctx->restart_out_mcache      = restart_out->mcache;
+  ctx->restart_out_sync        = fd_mcache_seq_laddr( ctx->restart_out_mcache );
+  ctx->restart_out_depth       = fd_mcache_depth( ctx->restart_out_mcache );
+  ctx->restart_out_seq         = fd_mcache_seq_query( ctx->restart_out_sync );
+  ctx->restart_out_mem         = topo->workspaces[ topo->objs[ restart_out->dcache_obj_id ].wksp_id ].wksp;
+  ctx->restart_out_chunk0      = fd_dcache_compact_chunk0( ctx->restart_out_mem, restart_out->dcache );
+  ctx->restart_out_wmark       = fd_dcache_compact_wmark ( ctx->restart_out_mem, restart_out->dcache, restart_out->mtu );
+  ctx->restart_out_chunk       = ctx->restart_out_chunk0;
 
   ulong scratch_top = FD_SCRATCH_ALLOC_FINI( l, 1UL );
   if( FD_UNLIKELY( scratch_top>( (ulong)scratch + scratch_footprint( tile ) ) ) )

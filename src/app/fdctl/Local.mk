@@ -41,6 +41,7 @@ ifdef FD_HAS_NO_AGAVE
 $(call add-objs,run/tiles/fd_repair,fd_fdctl)
 $(call add-objs,run/tiles/fd_gossip,fd_fdctl)
 $(call add-objs,run/tiles/fd_store_int,fd_fdctl)
+$(call add-objs,run/tiles/fd_restart,fd_fdctl)
 $(call add-objs,run/tiles/fd_replay,fd_fdctl)
 $(call add-objs,run/tiles/fd_replay_thread,fd_fdctl)
 $(call add-objs,run/tiles/fd_poh_int,fd_fdctl)

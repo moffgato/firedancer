@@ -55,16 +55,18 @@
 #define MAX_TXNS_PER_REPLAY ( ( FD_SHRED_MAX_PER_SLOT * FD_SHRED_MAX_SZ) / FD_TXN_MIN_SERIALIZED_SZ )
 
 
-#define STORE_IN_IDX   (0UL)
-#define PACK_IN_IDX    (1UL)
-#define POH_IN_IDX     (2UL)
-#define SIGN_IN_IDX    (3UL)
+#define STORE_IN_IDX    (0UL)
+#define PACK_IN_IDX     (1UL)
+#define POH_IN_IDX      (2UL)
+#define RESTART_IN_IDX  (3UL)
+#define SIGN_IN_IDX     (4UL)
 
-#define POH_OUT_IDX    (0UL)
-#define NOTIF_OUT_IDX  (1UL)
-#define SENDER_OUT_IDX (2UL)
-#define SIGN_OUT_IDX   (3UL)
-#define NET_OUT_IDX    (4UL)
+#define POH_OUT_IDX     (0UL)
+#define NOTIF_OUT_IDX   (1UL)
+#define SENDER_OUT_IDX  (2UL)
+#define RESTART_OUT_IDX (3UL)
+#define SIGN_OUT_IDX    (4UL)
+#define NET_OUT_IDX     (5UL)
 
 /* Scratch space estimates.
    TODO: Update constants and add explanation
@@ -93,6 +95,11 @@ struct fd_replay_tile_ctx {
   fd_wksp_t * pack_in_mem;
   ulong       pack_in_chunk0;
   ulong       pack_in_wmark;
+
+  // Gossip tile input for wen-restart
+  fd_wksp_t * restart_in_mem;
+  ulong       restart_in_chunk0;
+  ulong       restart_in_wmark;
 
   // PoH tile output defs
   fd_frag_meta_t * poh_out_mcache;
@@ -137,6 +144,17 @@ struct fd_replay_tile_ctx {
   ulong       net_out_chunk0;
   ulong       net_out_wmark;
   ulong       net_out_chunk;
+
+  // Gossip tile output defs for wen-restart
+  fd_frag_meta_t * restart_out_mcache;
+  ulong *          restart_out_sync;
+  ulong            restart_out_depth;
+  ulong            restart_out_seq;
+
+  fd_wksp_t * restart_out_mem;
+  ulong       restart_out_chunk0;
+  ulong       restart_out_wmark;
+  ulong       restart_out_chunk;
 
   // Stake weights output link defs
   fd_frag_meta_t * stake_weights_out_mcache;
@@ -374,6 +392,36 @@ during_frag( void * _ctx,
     }
 
     FD_LOG_DEBUG(( "packed microblock - slot: %lu, parent_slot: %lu, txn_cnt: %lu", ctx->curr_slot, ctx->parent_slot, ctx->txn_cnt ));
+  } else if( in_idx == RESTART_IN_IDX ) {
+    /* TODO: check sz */
+    uchar * src = (uchar *)fd_chunk_to_laddr( ctx->restart_in_mem, chunk);
+    fd_gossip_restart_last_voted_fork_slots_t * msg = (fd_gossip_restart_last_voted_fork_slots_t *) fd_type_pun( src );
+    msg->offsets.inner.raw_offsets.offsets.bits.bits = src + sizeof(fd_gossip_restart_last_voted_fork_slots_t);
+    void fd_wen_restart_entry( fd_gossip_restart_last_voted_fork_slots_t * last_voted_msg );
+    fd_wen_restart_entry( msg );
+
+    static ulong guard = 0;
+    if ( guard++ == 0 ) {
+      fd_gossip_restart_last_voted_fork_slots_t echo_msg;
+      fd_base58_decode_32("7eMvjQbDkSN8hmcdn5yKpDe4cKtVC9xRnvJqJn8oRF8v", echo_msg.last_voted_hash.hash);
+      echo_msg.shred_version                                   = 16013U;
+      echo_msg.last_voted_slot                                 = 1730UL;
+      echo_msg.offsets.discriminant                            = fd_restart_slots_offsets_enum_raw_offsets;
+      echo_msg.offsets.inner.raw_offsets.offsets.has_bits      = 1;
+      echo_msg.offsets.inner.raw_offsets.offsets.len           = 1729UL;
+      echo_msg.offsets.inner.raw_offsets.offsets.bits.bits_len = 217UL;
+
+      uchar * echo_vote_msg_ = fd_chunk_to_laddr( ctx->restart_out_mem, ctx->restart_out_chunk );
+      memcpy( echo_vote_msg_, &echo_msg, sizeof(fd_gossip_restart_last_voted_fork_slots_t) );
+      uchar * tmp = echo_vote_msg_ + sizeof(fd_gossip_restart_last_voted_fork_slots_t);
+      for ( ulong i = 0; i < 217; i++ ) tmp[i] = 0xFF;
+      ulong total_len = sizeof(fd_gossip_restart_last_voted_fork_slots_t) + 217;
+      fd_mcache_publish( ctx->restart_out_mcache, ctx->restart_out_depth, ctx->restart_out_seq, 1UL, ctx->restart_out_chunk,
+                         total_len, 0UL, 0, 0 );
+      ctx->restart_out_seq   = fd_seq_inc( ctx->restart_out_seq, 1UL );
+      ctx->restart_out_chunk = fd_dcache_compact_next( ctx->restart_out_chunk, total_len, ctx->restart_out_chunk0, ctx->restart_out_wmark );
+    }
+    return;
   }
 
   // if( ctx->flags & REPLAY_FLAG_PACKED_MICROBLOCK ) {
@@ -1590,6 +1638,12 @@ unprivileged_init( fd_topo_t *      topo,
   ctx->pack_in_chunk0           = fd_dcache_compact_chunk0( ctx->pack_in_mem, pack_in_link->dcache );
   ctx->pack_in_wmark            = fd_dcache_compact_wmark( ctx->pack_in_mem, pack_in_link->dcache, pack_in_link->mtu );
 
+  /* Set up gossip tile input for wen-restart */
+  fd_topo_link_t * restart_in_link = &topo->links[ tile->in_link_id[ RESTART_IN_IDX ] ];
+  ctx->restart_in_mem              = topo->workspaces[ topo->objs[ restart_in_link->dcache_obj_id ].wksp_id ].wksp;
+  ctx->restart_in_chunk0           = fd_dcache_compact_chunk0( ctx->restart_in_mem, restart_in_link->dcache );
+  ctx->restart_in_wmark            = fd_dcache_compact_wmark( ctx->restart_in_mem, restart_in_link->dcache, restart_in_link->mtu );
+
   fd_topo_link_t * poh_out_link = &topo->links[ tile->out_link_id[ POH_OUT_IDX ] ];
   ctx->poh_out_mcache           = poh_out_link->mcache;
   ctx->poh_out_sync             = fd_mcache_seq_laddr( ctx->poh_out_mcache );
@@ -1629,6 +1683,16 @@ unprivileged_init( fd_topo_t *      topo,
   ctx->net_out_mem         = topo->workspaces[ topo->objs[ net_out->dcache_obj_id ].wksp_id ].wksp;
   ctx->net_out_wmark       = fd_dcache_compact_wmark( ctx->net_out_mem, net_out->dcache, net_out->mtu );
   ctx->net_out_chunk       = ctx->net_out_chunk0;
+
+  fd_topo_link_t * restart_out = &topo->links[ tile->out_link_id[ RESTART_OUT_IDX ] ];
+  ctx->restart_out_mcache      = restart_out->mcache;
+  ctx->restart_out_sync        = fd_mcache_seq_laddr( ctx->restart_out_mcache );
+  ctx->restart_out_depth       = fd_mcache_depth( ctx->restart_out_mcache );
+  ctx->restart_out_seq         = fd_mcache_seq_query( ctx->restart_out_sync );
+  ctx->restart_out_chunk0      = fd_dcache_compact_chunk0( fd_wksp_containing( restart_out->dcache ), restart_out->dcache );
+  ctx->restart_out_mem         = topo->workspaces[ topo->objs[ restart_out->dcache_obj_id ].wksp_id ].wksp;
+  ctx->restart_out_wmark       = fd_dcache_compact_wmark( ctx->restart_out_mem, restart_out->dcache, restart_out->mtu );
+  ctx->restart_out_chunk       = ctx->restart_out_chunk0;
 
   /* Set up stake weights tile output */
   fd_topo_link_t * stake_weights_out = &topo->links[ tile->out_link_id_primary ];

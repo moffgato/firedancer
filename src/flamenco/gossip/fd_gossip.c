@@ -779,6 +779,10 @@ fd_gossip_sign_crds_value( fd_gossip_t * glob, fd_crds_value_t * crd ) {
     pubkey = &crd->data.inner.contact_info_v2.from;
     wallclock = &crd->data.inner.contact_info_v2.wallclock;
     break;
+  case fd_crds_data_enum_restart_last_voted_fork_slots:
+    pubkey = &crd->data.inner.restart_last_voted_fork_slots.from;
+    wallclock = &crd->data.inner.restart_last_voted_fork_slots.wallclock;
+    break;
   default:
     return;
   }
@@ -1120,10 +1124,15 @@ fd_gossip_recv_crds_value(fd_gossip_t * glob, const fd_gossip_peer_addr_t * from
     pubkey = &crd->data.inner.contact_info_v2.from;
     wallclock = crd->data.inner.contact_info_v2.wallclock;
     break;
+  case fd_crds_data_enum_restart_last_voted_fork_slots:
+    pubkey = &crd->data.inner.restart_last_voted_fork_slots.from;
+    wallclock = crd->data.inner.restart_last_voted_fork_slots.wallclock;
+    break;
   default:
     wallclock = FD_NANOSEC_TO_MILLI(glob->now); /* In millisecs */
     break;
   }
+
   if (memcmp(pubkey->uc, glob->public_key->uc, 32U) == 0)
     /* Ignore my own messages */
     return;
