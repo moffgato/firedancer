@@ -152,6 +152,8 @@ fd_acc_exists( fd_account_meta_t const * m ) {
    - if out_rec!=NULL, sets *out_rec to a pointer to the funk rec.
      This handle is suitable as opt_con_rec for fd_acc_mgr_modify_raw.
    - notably, leaves *opt_err untouched, even if opt_err!=NULL
+   - if txn_out!=NULL, sets *txn_out to the pointer of the funk txn the
+     record was found it
 
    First byte of returned pointer is first byte of fd_account_meta_t.
    To find data region of account, add (fd_account_meta_t)->hlen.
@@ -173,7 +175,8 @@ fd_acc_mgr_view_raw( fd_acc_mgr_t *         acc_mgr,
                      fd_funk_txn_t const *  txn,
                      fd_pubkey_t const *    pubkey,
                      fd_funk_rec_t const ** opt_out_rec,
-                     int *                  opt_err );
+                     int *                  opt_err,
+                     fd_funk_txn_t const ** txn_out  );
 
 int
 fd_acc_mgr_view( fd_acc_mgr_t *          acc_mgr,

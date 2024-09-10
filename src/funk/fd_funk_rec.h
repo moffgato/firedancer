@@ -157,9 +157,6 @@ FD_FN_PURE static inline int fd_funk_rec_is_full( fd_funk_rec_t const * map ) { 
    the txn of the returned record may not match txn but will be the txn
    of most recent ancestor with the key otherwise.
 
-   fd_funk_rec_query_global_const is the same but it is safe to have
-   multiple threads concurrently run queries.
-
    Important safety tip!  These functions can potentially return records
    that have the ERASE flag set.  (This allows, for example, a caller to
    discard an erase for an unfrozen in-preparation transaction.)  In
@@ -175,7 +172,8 @@ fd_funk_rec_query( fd_funk_t *               funk,
 FD_FN_PURE fd_funk_rec_t const *
 fd_funk_rec_query_global( fd_funk_t *               funk,
                           fd_funk_txn_t const *     txn,
-                          fd_funk_rec_key_t const * key );
+                          fd_funk_rec_key_t const * key,
+                          fd_funk_txn_t const **    txn_out );
 
 /* fd_funk_rec_query_safe is a query that is safe in the presence of
    concurrent writes. The result data is copied into a buffer
@@ -388,7 +386,7 @@ fd_funk_rec_is_modified( fd_funk_t *           funk,
    This is O(orig_rec) size.  If the caller doesn't have the
    original record lying around, it can be found via:
 
-     fd_funk_rec_t const * orig_rec = fd_funk_rec_query_global( funk, txn_parent, key );
+     fd_funk_rec_t const * orig_rec = fd_funk_rec_query_global( funk, txn_parent, key, NULL );
 
    This is O(ancestor depth to orig rec) and accounts for that the
    previous version of the record might not be in txn's parent. */
@@ -491,7 +489,7 @@ fd_funk_rec_remove( fd_funk_t *     funk,
    than this size, padding with zeros if necessary.
 
    The irec argument is the previous incarnation of the record if
-   known (i.e. the result of fd_funk_rec_query_global( funk, txn, key
+   known (i.e. the result of fd_funk_rec_query_global( funk, txn, key, NULL
    ) ). This allows the elimination of the query in some cases. Use
    NULL if this value is unavailable. */
 fd_funk_rec_t *
