@@ -909,31 +909,68 @@ dump_instr_to_protobuf( fd_exec_txn_ctx_t *txn_ctx,
   } FD_SCRATCH_SCOPE_END;
 }
 
+/* https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/sdk/src/transaction_context.rs#L319-L357 */
+int
+fd_txn_ctx_push( fd_exec_txn_ctx_t * txn_ctx ) {
+  /* Earlier checks in the permalink are redundant since Agave maintains instr stack and trace accounts separately
+     https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/sdk/src/transaction_context.rs#L347-L351 */
+  if( txn_ctx->instr_trace_length>=FD_MAX_INSTRUCTION_TRACE_LENGTH ) {
+    return FD_EXECUTOR_INSTR_ERR_MAX_INSN_TRACE_LENS_EXCEEDED;
+  }
+  txn_ctx->instr_trace_length++;
+
+  /* https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/sdk/src/transaction_context.rs#L352-L356 */
+  if( txn_ctx->instr_stack_sz>=FD_MAX_INSTRUCTION_STACK_DEPTH ) {
+    return FD_EXECUTOR_INSTR_ERR_CALL_DEPTH;
+  }
+  txn_ctx->instr_stack_sz++;
+
+  return FD_EXECUTOR_INSTR_SUCCESS;
+}
+
+/* https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/program-runtime/src/invoke_context.rs#L246-L290 */
+int
+fd_instr_stack_push( fd_exec_txn_ctx_t *     txn_ctx,
+                     fd_instr_info_t const * instr ) {
+  /* https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/program-runtime/src/invoke_context.rs#L256-L286 */
+  if( txn_ctx->instr_stack_sz ) {
+    /* https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/program-runtime/src/invoke_context.rs#L261-L285 */
+    uchar contains = 0;
+    uchar is_last  = 0;
+    for( uchar level=0; level<txn_ctx->instr_stack_sz; level++ ) {
+      fd_exec_instr_ctx_t * instr_ctx = &txn_ctx->instr_stack[level];
+      if( !memcmp( instr->program_id_pubkey.uc, instr_ctx->instr->program_id_pubkey.uc, sizeof(fd_pubkey_t) ) ) {
+        if( level == txn_ctx->instr_stack_sz-1 ) {
+          is_last = 1;
+        }
+        contains = 1;
+      }
+    }
+    /* https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/program-runtime/src/invoke_context.rs#L282-L285 */
+    if( FD_UNLIKELY( contains && !is_last ) ) {
+      return FD_EXECUTOR_INSTR_ERR_REENTRANCY_NOT_ALLOWED;
+    }
+  }
+  /* https://github.com/anza-xyz/agave/blob/c4b42ab045860d7b13b3912eafb30e6d2f4e593f/program-runtime/src/invoke_context.rs#L289 */
+  return fd_txn_ctx_push( txn_ctx );
+}
+
 int
 fd_execute_instr( fd_exec_txn_ctx_t * txn_ctx,
                   fd_instr_info_t *   instr ) {
   FD_SCRATCH_SCOPE_BEGIN {
-    ulong max_num_instructions = FD_FEATURE_ACTIVE( txn_ctx->slot_ctx, limit_max_instruction_trace_length ) ? FD_MAX_INSTRUCTION_TRACE_LENGTH : ULONG_MAX;
-    if( txn_ctx->num_instructions >= max_num_instructions ) {
-      return FD_EXECUTOR_INSTR_ERR_MAX_INSN_TRACE_LENS_EXCEEDED;
-    }
-    txn_ctx->num_instructions++;
     fd_pubkey_t const * txn_accs = txn_ctx->accounts;
-
-    ulong starting_lamports_h = 0;
-    ulong starting_lamports_l = 0;
-    int err = fd_instr_info_sum_account_lamports( instr, &starting_lamports_h, &starting_lamports_l );
-    if( err ) {
-      return err;
-    }
-    instr->starting_lamports_h = starting_lamports_h;
-    instr->starting_lamports_l = starting_lamports_l;
 
     fd_exec_instr_ctx_t * parent = NULL;
     if( txn_ctx->instr_stack_sz )
       parent = &txn_ctx->instr_stack[ txn_ctx->instr_stack_sz - 1 ];
 
-    fd_exec_instr_ctx_t * ctx = &txn_ctx->instr_stack[ txn_ctx->instr_stack_sz++ ];
+    int err = fd_instr_stack_push( txn_ctx, instr );
+    if( FD_UNLIKELY( err ) ) {
+      return err;
+    }
+
+    fd_exec_instr_ctx_t * ctx = &txn_ctx->instr_stack[ txn_ctx->instr_stack_sz - 1 ];
     *ctx = (fd_exec_instr_ctx_t) {
       .instr     = instr,
       .txn_ctx   = txn_ctx,
@@ -948,21 +985,20 @@ fd_execute_instr( fd_exec_txn_ctx_t * txn_ctx,
       .child_cnt = 0U,
     };
 
-    /* Add the instruction to the trace */
-    txn_ctx->instr_trace[ txn_ctx->instr_trace_length++ ] = (fd_exec_instr_trace_entry_t) {
+    txn_ctx->instr_trace[ txn_ctx->instr_trace_length - 1 ] = (fd_exec_instr_trace_entry_t) {
       .instr_info = instr,
       .stack_height = txn_ctx->instr_stack_sz,
     };
 
-    // defense in depth
-    if( instr->program_id >= txn_ctx->txn_descriptor->acct_addr_cnt + txn_ctx->txn_descriptor->addr_table_adtl_cnt ) {
-      FD_LOG_WARNING(( "INVALID PROGRAM ID, RUNTIME BUG!!!" ));
-      int exec_result = FD_EXECUTOR_INSTR_ERR_NOT_ENOUGH_ACC_KEYS;
+    ulong starting_lamports_h = 0;
+    ulong starting_lamports_l = 0;
+    err = fd_instr_info_sum_account_lamports( instr, &starting_lamports_h, &starting_lamports_l );
+    if( FD_UNLIKELY( err ) ) {
       txn_ctx->instr_stack_sz--;
-
-      FD_LOG_WARNING(( "instruction executed unsuccessfully: error code %d", exec_result ));
-      return exec_result;
+      return err;
     }
+    instr->starting_lamports_h = starting_lamports_h;
+    instr->starting_lamports_l = starting_lamports_l;
 
     fd_exec_instr_fn_t  native_prog_fn = fd_executor_lookup_native_program( &txn_ctx->borrowed_accounts[ instr->program_id ] );
     fd_pubkey_t const * program_id     = &txn_accs[ instr->program_id ];
