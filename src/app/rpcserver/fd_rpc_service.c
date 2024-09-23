@@ -1427,6 +1427,7 @@ method_getTransaction(struct json_values* values, fd_rpc_ctx_t * ctx) {
     fd_method_error(ctx, -1, "invalid commitment %s", (const char*)commit_str);
     return 0;
   }
+  (void)need_blk_flags;
 
   uchar key[FD_ED25519_SIG_SZ];
   if ( fd_base58_decode_64( sig, key) == NULL ) {
@@ -1438,8 +1439,8 @@ method_getTransaction(struct json_values* values, fd_rpc_ctx_t * ctx) {
   uchar blk_flags;
   uchar txn_data_raw[FD_TXN_MTU];
   fd_blockstore_t * blockstore = ctx->global->blockstore;
-  if( fd_blockstore_txn_query_volatile( blockstore, key, &elem, &blk_ts, &blk_flags, txn_data_raw ) ||
-      ( blk_flags & need_blk_flags ) == (uchar)0 ) {
+  if( fd_blockstore_txn_query_volatile( blockstore, key, &elem, &blk_ts, &blk_flags, txn_data_raw )
+      /* || ( blk_flags & need_blk_flags ) == (uchar)0 */ ) {
     fd_web_reply_sprintf(ws, "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":%s}" CRLF, ctx->call_id);
     return 0;
   }
