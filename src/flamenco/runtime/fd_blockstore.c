@@ -386,6 +386,20 @@ fd_blockstore_txn_key_hash( fd_blockstore_txn_key_t const * k, ulong seed ) {
   return h;
 }
 
+#define SORT_NAME sort_block_acct_sig
+#define SORT_KEY_T fd_block_acct_sig_ref_t
+static int
+fd_block_acct_sig_compare(fd_block_acct_sig_ref_t const * a, fd_block_acct_sig_ref_t const * b) {
+  for (uint i = 0; i < sizeof(fd_pubkey_t)/sizeof(ulong); ++i) {
+    ulong al = a->acct.ul[i];
+    ulong bl = b->acct.ul[i];
+    if (al != bl) return (al < bl);
+  }
+  return 0;
+}
+#define SORT_BEFORE(a,b) fd_block_acct_sig_compare(&a, &b)
+#include "../../util/tmpl/fd_sort.c"
+
 static void
 fd_blockstore_scan_block( fd_blockstore_t * blockstore, ulong slot, fd_block_t * block ) {
 
@@ -395,6 +409,9 @@ fd_blockstore_scan_block( fd_blockstore_t * blockstore, ulong slot, fd_block_t *
 #define MAX_TXNS ( 1 << 18 )
   fd_block_txn_ref_t txns[MAX_TXNS];
   ulong              txns_cnt = 0;
+#define MAX_ACCT_SIGS ( 1 << 15 )
+  fd_block_acct_sig_ref_t acct_sigs[MAX_ACCT_SIGS];
+  ulong                   acct_sigs_cnt = 0;
 
   uchar * data = fd_wksp_laddr_fast( fd_blockstore_wksp( blockstore ), block->data_gaddr );
   ulong   sz   = block->data_sz;
@@ -444,6 +461,17 @@ fd_blockstore_scan_block( fd_blockstore_t * blockstore, ulong slot, fd_block_t *
 
         fd_blockstore_txn_key_t const * sigs =
             (fd_blockstore_txn_key_t const *)( (ulong)raw + (ulong)txn->signature_off );
+
+        if( blockstore->extra_maps ) {
+          fd_pubkey_t * tx_accs   = (fd_pubkey_t *)((uchar *)raw + txn->acct_addr_off);
+          for( ushort j = 0; j < txn->acct_addr_cnt && acct_sigs_cnt < MAX_ACCT_SIGS; ++j ) {
+            fd_block_acct_sig_ref_t * ref = &acct_sigs[acct_sigs_cnt++];
+            fd_memcpy( &ref->acct, tx_accs + j, sizeof(fd_pubkey_t) );
+            ref->txn_off                  = blockoff;
+            ref->id_off                   = (ulong)sigs - (ulong)data;
+          }
+        }
+
         fd_blockstore_txn_map_t * txn_map = fd_blockstore_txn_map( blockstore );
         for( ulong j = 0; j < txn->signature_cnt; j++ ) {
           if( FD_UNLIKELY( fd_blockstore_txn_map_key_cnt( txn_map ) ==
@@ -488,6 +516,20 @@ fd_blockstore_scan_block( fd_blockstore_t * blockstore, ulong slot, fd_block_t *
   fd_memcpy( txns_laddr, txns, sizeof( fd_block_txn_ref_t ) * txns_cnt );
   block->txns_gaddr = fd_wksp_gaddr_fast( fd_blockstore_wksp( blockstore ), txns_laddr );
   block->txns_cnt   = txns_cnt;
+
+  if( blockstore->extra_maps ) {
+    /* Sort so we can use binary search to find an account */
+    sort_block_acct_sig_inplace( acct_sigs, acct_sigs_cnt );
+
+    /* Copy out the account map */
+    fd_block_acct_sig_ref_t * acct_sigs_laddr =
+      fd_alloc_malloc( fd_blockstore_alloc( blockstore ),
+                       alignof( fd_block_acct_sig_ref_t ),
+                       sizeof( fd_block_acct_sig_ref_t ) * acct_sigs_cnt );
+    fd_memcpy( acct_sigs_laddr, acct_sigs, sizeof( fd_block_acct_sig_ref_t ) * acct_sigs_cnt );
+    block->acct_sigs_gaddr = fd_wksp_gaddr_fast( fd_blockstore_wksp( blockstore ), acct_sigs_laddr );
+    block->acct_sigs_cnt   = acct_sigs_cnt;
+  }
 }
 
 /* Remove a slot from blockstore */

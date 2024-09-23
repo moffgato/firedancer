@@ -286,6 +286,7 @@ typedef struct {
     struct {
       char  blockstore_restore[ PATH_MAX ];
       char  slots_pending[PATH_MAX];
+      int   tx_metadata_storage;
 
       /* non-config */
 

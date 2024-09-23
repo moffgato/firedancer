@@ -433,6 +433,7 @@ fd_topo_firedancer( config_t * _config ) {
       tile->shred.larger_shred_limits_per_block = config->development.bench.larger_shred_limits_per_block;
 
     } else if( FD_UNLIKELY( !strcmp( tile->name, "storei" ) ) ) {
+      tile->store_int.tx_metadata_storage = config->rpc.extended_tx_metadata_storage;
       strncpy( tile->store_int.blockstore_restore, config->tiles.store_int.blockstore_restore, sizeof(tile->store_int.blockstore_restore) );
       strncpy( tile->store_int.identity_key_path, config->consensus.identity_path, sizeof(tile->store_int.identity_key_path) );
       strncpy( tile->store_int.slots_pending, config->tiles.store_int.slots_pending, sizeof( tile->store_int.slots_pending ) );

@@ -86,6 +86,8 @@ struct fd_store_tile_ctx {
   fd_store_t * store;
   fd_blockstore_t * blockstore;
 
+  int         tx_metadata_storage;
+
   fd_wksp_t * stake_in_mem;
   ulong       stake_in_chunk0;
   ulong       stake_in_wmark;
@@ -557,6 +559,8 @@ unprivileged_init( fd_topo_t *      topo,
 
   FD_SCRATCH_ALLOC_INIT( l, scratch );
   fd_store_tile_ctx_t * ctx = FD_SCRATCH_ALLOC_APPEND( l, alignof(fd_store_tile_ctx_t), sizeof(fd_store_tile_ctx_t) );
+  ctx->tx_metadata_storage = tile->store_int.tx_metadata_storage;
+
   // TODO: set the lo_mark_slot to the actual snapshot slot!
   ctx->store = fd_store_join( fd_store_new( FD_SCRATCH_ALLOC_APPEND( l, fd_store_align(), fd_store_footprint() ), 1 ) );
   ctx->repair_req_buffer = FD_SCRATCH_ALLOC_APPEND( l, alignof(fd_repair_request_t), MAX_REPAIR_REQS * sizeof(fd_repair_request_t) );
@@ -634,6 +638,7 @@ unprivileged_init( fd_topo_t *      topo,
     }
 
     ctx->blockstore = fd_blockstore_join( fd_blockstore_new( blockstore_shmem, 1, ctx->blockstore_seed, FD_BUF_SHRED_MAP_MAX, FD_BLOCK_MAX, FD_TXN_MAP_LG_MAX ) );
+    ctx->blockstore->extra_maps = ctx->tx_metadata_storage;
   }
 
   FD_TEST( ctx->blockstore );

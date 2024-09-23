@@ -140,6 +140,14 @@ struct fd_block_txn_ref {
 };
 typedef struct fd_block_txn_ref fd_block_txn_ref_t;
 
+/* A reference from an account address to a transaction that uses the account */
+struct fd_block_acct_sig_ref {
+  fd_pubkey_t acct;
+  ulong txn_off; /* offset into block data of transaction */
+  ulong id_off;  /* offset into block data of transaction identifiers */
+};
+typedef struct fd_block_acct_sig_ref fd_block_acct_sig_ref_t;
+
 /* If the 0th bit is set, this indicates the block is preparing, which
    means it might be partially executed e.g. a subset of the microblocks
    have been executed.  It is not safe to remove, relocate, or modify
@@ -185,6 +193,8 @@ struct fd_block {
   ulong micros_cnt;
   ulong txns_gaddr;   /* ptr to the list of fd_blockstore_txn_ref_t */
   ulong txns_cnt;
+  ulong acct_sigs_gaddr;   /* ptr to the list of fd_block_acct_sig_ref_t */
+  ulong acct_sigs_cnt;
   ulong txns_meta_gaddr; /* ptr to the allocation for txn meta data */
   ulong txns_meta_sz;
 };
@@ -264,6 +274,7 @@ struct __attribute__((aligned(FD_BLOCKSTORE_ALIGN))) fd_blockstore_private {
   ulong blockstore_gaddr;
   ulong wksp_tag;
   ulong seed;
+  int   extra_maps; /* Create extra maps needed by rpc service */
 
   /* Concurrency */
 
