@@ -66,6 +66,7 @@ name = \"fd1\"
     level_flush = \"ERR\"
 [development]
     topology = \"firedancer\"
+
 [consensus]
     vote = true
     identity_path = \"fd-identity-keypair.json\"

@@ -95,8 +95,6 @@ echo "
   level_stderr = \"NOTICE\"
 [development]
     topology = \"firedancer\"
-    [development.bench]
-        larger_max_cost_per_block = true
 " > fddev.toml
 
 # JOB_URL is potentially set by the github workflow
