@@ -1254,7 +1254,7 @@ fd_blockstore_txn_query_volatile( fd_blockstore_t * blockstore, uchar const sig[
 }
 
 long
-fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot, fd_pubkey_t const * acct, uchar * sigs_out, ulong result_max ) {
+fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot, fd_pubkey_t const * acct, fd_acct_sig_query_result_t * result_out, ulong result_max ) {
   /* WARNING: this code is extremely delicate. Do NOT modify without
      understanding all the invariants. In particular, we must never
      dereference through a corrupt pointer. It's OK for the
@@ -1306,7 +1306,11 @@ fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot,
     while( i < result_max && low + (long)i < (long)accts_cnt ) {
       fd_block_acct_sig_ref_t * ref = &accts[ low + (long)i ];
       if( fd_block_acct_sig_compare2( ref, &key ) != 0 ) break;
-      fd_memcpy( sigs_out + i*FD_ED25519_SIG_SZ, (uchar const*)block + ref->id_off, FD_ED25519_SIG_SZ );
+      fd_acct_sig_query_result_t * res = &result_out[ i ];
+      fd_memcpy( res->sig, (uchar const*)block + ref->id_off, FD_ED25519_SIG_SZ );
+      res->slot = slot;
+      res->ts = query->ts;
+      res->flags = query->flags;
       ++i;
     }
 

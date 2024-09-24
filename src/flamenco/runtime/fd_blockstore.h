@@ -553,8 +553,15 @@ fd_blockstore_txn_query_volatile( fd_blockstore_t * blockstore, uchar const sig[
 
 /* Query the list of transactions signatures associated with an
    account in a block. The number of signatures is returned. */
+struct fd_acct_sig_query_result {
+    uchar sig[FD_ED25519_SIG_SZ];
+    ulong slot;
+    long  ts;             /* the wallclock time when we finished receiving the block. */
+    uchar flags;          /* block flags */
+};
+typedef struct fd_acct_sig_query_result fd_acct_sig_query_result_t;
 long
-fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot, fd_pubkey_t const * acct, uchar * sigs_out, ulong result_max );
+fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot, fd_pubkey_t const * acct, fd_acct_sig_query_result_t * result_out, ulong result_max );
 
 /* Remove slot from blockstore, including all relevant internal structures. */
 void

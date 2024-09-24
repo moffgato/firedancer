@@ -1186,10 +1186,55 @@ method_getRecentPrioritizationFees(struct json_values* values, fd_rpc_ctx_t * ct
 // Implementation of the "getSignaturesForAddress" methods
 static int
 method_getSignaturesForAddress(struct json_values* values, fd_rpc_ctx_t * ctx) {
-  (void)values;
-  (void)ctx;
-  FD_LOG_WARNING(( "getSignaturesForAddress is not implemented" ));
-  fd_method_error(ctx, -1, "getSignaturesForAddress is not implemented");
+   fd_webserver_t * ws = &ctx->global->ws;
+
+  FD_SCRATCH_SCOPE_BEGIN {
+    // Path to argument
+    static const uint PATH[3] = {
+      (JSON_TOKEN_LBRACE<<16) | KEYW_JSON_PARAMS,
+      (JSON_TOKEN_LBRACKET<<16) | 0,
+      (JSON_TOKEN_STRING<<16)
+    };
+    ulong arg_sz = 0;
+    const void* arg = json_get_value(values, PATH, 3, &arg_sz);
+    if (arg == NULL) {
+      fd_method_error(ctx, -1, "getSignaturesForAddress requires a string as first parameter");
+      return 0;
+    }
+    fd_pubkey_t acct;
+    if( fd_base58_decode_32((const char *)arg, acct.uc) == NULL ) {
+      fd_method_error(ctx, -1, "invalid base58 encoding");
+      return 0;
+    }
+
+    static const uint PATH2[4] = {
+      (JSON_TOKEN_LBRACE<<16) | KEYW_JSON_PARAMS,
+      (JSON_TOKEN_LBRACKET<<16) | 1,
+      (JSON_TOKEN_LBRACE<<16) | KEYW_JSON_LIMIT,
+      (JSON_TOKEN_INTEGER<<16)
+    };
+    ulong limit_sz = 0;
+    const void* limit_ptr = json_get_value(values, PATH2, 4, &limit_sz);
+    ulong limit = ( limit_ptr ? fd_ulong_min( *(const ulong*)limit_ptr, 1000U ) : 1000U );
+
+    ulong sigs_cnt = 0;
+    fd_acct_sig_query_result_t * sigs = fd_scratch_alloc( alignof(fd_acct_sig_query_result_t), limit*sizeof(fd_acct_sig_query_result_t) );
+    fd_blockstore_t * blockstore = ctx->global->blockstore;
+    for( ulong slot = blockstore->max; slot >= blockstore->min && sigs_cnt < limit; --slot ) {
+      long r = fd_blockstore_acct_sig_query_volatile( blockstore, slot, &acct, sigs + sigs_cnt, limit - sigs_cnt );
+      if( r < 0 ) {
+        fd_method_error(ctx, -1, "failure to query account");
+        return 0;
+      }
+      sigs_cnt += (ulong)r;
+    }
+
+    fd_web_reply_sprintf(ws, "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"" FIREDANCER_VERSION "\",\"slot\":%lu},\"value\":[",
+                         ctx->global->last_slot_notify.slot_exec.slot);
+    fd_web_reply_sprintf(ws, "]},\"id\":%s}" CRLF, ctx->call_id);
+
+  } FD_SCRATCH_SCOPE_END;
+
   return 0;
 }
 
