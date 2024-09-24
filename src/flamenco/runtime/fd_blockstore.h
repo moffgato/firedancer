@@ -551,6 +551,11 @@ fd_blockstore_txn_query( fd_blockstore_t * blockstore, uchar const sig[static FD
 int
 fd_blockstore_txn_query_volatile( fd_blockstore_t * blockstore, uchar const sig[static FD_ED25519_SIG_SZ], fd_blockstore_txn_map_t * txn_out, long * blk_ts, uchar * blk_flags, uchar txn_data_out[FD_TXN_MTU] );
 
+/* Query the list of transactions signatures associated with an
+   account in a block. The number of signatures is returned. */
+long
+fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot, fd_pubkey_t const * acct, uchar * sigs_out, ulong result_max );
+
 /* Remove slot from blockstore, including all relevant internal structures. */
 void
 fd_blockstore_slot_remove( fd_blockstore_t * blockstore, ulong slot );

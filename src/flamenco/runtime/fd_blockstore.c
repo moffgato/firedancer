@@ -397,6 +397,15 @@ fd_block_acct_sig_compare(fd_block_acct_sig_ref_t const * a, fd_block_acct_sig_r
   }
   return 0;
 }
+static int
+fd_block_acct_sig_compare2(fd_block_acct_sig_ref_t const * a, fd_block_acct_sig_ref_t const * b) {
+  for (uint i = 0; i < sizeof(fd_pubkey_t)/sizeof(ulong); ++i) {
+    ulong al = a->acct.ul[i];
+    ulong bl = b->acct.ul[i];
+    if (al != bl) return (al < bl ? -1 : 1);
+  }
+  return 0;
+}
 #define SORT_BEFORE(a,b) fd_block_acct_sig_compare(&a, &b)
 #include "../../util/tmpl/fd_sort.c"
 
@@ -602,6 +611,7 @@ fd_blockstore_slot_remove( fd_blockstore_t * blockstore, ulong slot ) {
   }
   if( block->micros_gaddr ) fd_alloc_free( alloc, fd_wksp_laddr_fast( wksp, block->micros_gaddr ) );
   if( block->txns_gaddr ) fd_alloc_free( alloc, txns );
+  if( block->acct_sigs_gaddr ) fd_alloc_free( alloc, fd_wksp_laddr_fast( wksp, block->acct_sigs_gaddr ) );
   ulong mgaddr = block->txns_meta_gaddr;
   while( mgaddr ) {
     ulong * laddr = fd_wksp_laddr_fast( wksp, mgaddr );
@@ -1240,6 +1250,69 @@ fd_blockstore_txn_query_volatile( fd_blockstore_t * blockstore, uchar const sig[
     if( FD_UNLIKELY( fd_readwrite_check_concur_read( &blockstore->lock, seqnum ) ) ) continue;
 
     return FD_BLOCKSTORE_OK;
+  }
+}
+
+long
+fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot, fd_pubkey_t const * acct, uchar * sigs_out, ulong result_max ) {
+  /* WARNING: this code is extremely delicate. Do NOT modify without
+     understanding all the invariants. In particular, we must never
+     dereference through a corrupt pointer. It's OK for the
+     destination data to be overwritten/invalid as long as the memory
+     location is valid. As long as we don't crash, we can validate the
+     data after it is read. */
+  fd_wksp_t * wksp = fd_blockstore_wksp( blockstore );
+  fd_block_map_t const * slot_map = fd_wksp_laddr_fast( wksp, blockstore->slot_map_gaddr );
+  for(;;) {
+    uint seqnum;
+    if( FD_UNLIKELY( fd_readwrite_start_concur_read( &blockstore->lock, &seqnum ) ) ) continue;
+    fd_block_map_t const * query = fd_block_map_query_safe( slot_map, &slot, NULL );
+    if( FD_UNLIKELY( !query ) ) return 0;
+    ulong blk_gaddr = query->block_gaddr;
+    if( FD_UNLIKELY( !blk_gaddr ) ) return 0;
+    fd_block_t * block = fd_wksp_laddr_fast( wksp, blk_gaddr );
+
+    if( FD_UNLIKELY( fd_readwrite_check_concur_read( &blockstore->lock, seqnum ) ) ) continue;
+
+    ulong accts_cnt = block->acct_sigs_cnt;
+    if( FD_UNLIKELY( !accts_cnt ) ) return 0;
+    fd_block_acct_sig_ref_t * accts = fd_wksp_laddr_fast( wksp, block->acct_sigs_gaddr );
+
+    if( FD_UNLIKELY( fd_readwrite_check_concur_read( &blockstore->lock, seqnum ) ) ) continue;
+
+    /* Use binary search to find the account in the block. */
+    fd_block_acct_sig_ref_t key;
+    key.acct = *acct;
+    long low = 0;
+    long high = (long)accts_cnt - 1;
+    while( low <= high ) {
+      long mid = (low + high)>>1U;
+      int c = fd_block_acct_sig_compare2( &accts[mid], &key );
+      if( c < 0 ) {
+        low = mid + 1;
+      } else if( c > 0 ) {
+        high = mid - 1;
+      } else if( low == high ) {
+        break;
+      } else {
+        /* We want the first one because the same account may be
+           repeated many times. */
+        high = mid;
+      }
+    }
+
+    /* Copy out signatures */
+    ulong i = 0;
+    while( i < result_max && low + (long)i < (long)accts_cnt ) {
+      fd_block_acct_sig_ref_t * ref = &accts[ low + (long)i ];
+      if( fd_block_acct_sig_compare2( ref, &key ) != 0 ) break;
+      fd_memcpy( sigs_out + i*FD_ED25519_SIG_SZ, (uchar const*)block + ref->id_off, FD_ED25519_SIG_SZ );
+      ++i;
+    }
+
+    if( FD_UNLIKELY( fd_readwrite_check_concur_read( &blockstore->lock, seqnum ) ) ) continue;
+
+    return (long)i;
   }
 }
 
