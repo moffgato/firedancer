@@ -548,6 +548,12 @@ fd_blockstore_slot_remove( fd_blockstore_t * blockstore, ulong slot ) {
   fd_block_map_t * block_map_entry = fd_block_map_remove( fd_blockstore_block_map( blockstore ), &slot );
   if( FD_UNLIKELY( !block_map_entry ) ) return;
 
+  /* Update mind */
+  while( blockstore->min <= blockstore->max &&
+         fd_blockstore_block_map_query( blockstore, blockstore->min ) == NULL ) {
+    blockstore->min ++;
+  }
+
   /* It is not safe to remove a replaying block. */
 
   if( FD_UNLIKELY( fd_uchar_extract_bit( block_map_entry->flags, FD_BLOCK_FLAG_REPLAYING ) ) ) {
@@ -620,6 +626,7 @@ fd_blockstore_slot_remove( fd_blockstore_t * blockstore, ulong slot ) {
     mgaddr = mgaddr2;
   }
   fd_alloc_free( alloc, block );
+
   return;
 }
 
@@ -829,6 +836,13 @@ deshred( fd_blockstore_t * blockstore, ulong slot ) {
 
     block_map_entry->flags = fd_uchar_clear_bit( block_map_entry->flags, FD_BLOCK_FLAG_SHREDDING );
     block_map_entry->flags = fd_uchar_set_bit( block_map_entry->flags, FD_BLOCK_FLAG_COMPLETED );
+
+    if( slot < blockstore->min ) {
+      blockstore->min = slot;
+    }
+    if( slot > blockstore->max ) {
+      blockstore->max = blockstore->hcs = slot;
+    }
 
     return FD_BLOCKSTORE_OK;
   case FD_SHRED_EBATCH:
