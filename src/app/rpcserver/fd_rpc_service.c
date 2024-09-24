@@ -19,6 +19,7 @@
 
 #define CRLF "\r\n"
 #define MATCH_STRING(_text_,_text_sz_,_str_) (_text_sz_ == sizeof(_str_)-1 && memcmp(_text_, _str_, sizeof(_str_)-1) == 0)
+#define EMIT_SIMPLE(_str_) fd_web_reply_append(ws, _str_, sizeof(_str_)-1)
 
 #define MAX_RECENT_BLOCKHASHES 300
 
@@ -1231,6 +1232,14 @@ method_getSignaturesForAddress(struct json_values* values, fd_rpc_ctx_t * ctx) {
 
     fd_web_reply_sprintf(ws, "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"" FIREDANCER_VERSION "\",\"slot\":%lu},\"value\":[",
                          ctx->global->last_slot_notify.slot_exec.slot);
+    for( ulong i = 0; i < sigs_cnt; ++i ) {
+      if( i ) EMIT_SIMPLE(",");
+      fd_acct_sig_query_result_t * sig = sigs + i;
+      char buf64[FD_BASE58_ENCODED_64_SZ];
+      fd_base58_encode_64(sig->sig, NULL, buf64);
+      fd_web_reply_sprintf(ws, "{\"blockTime\":%ld,\"confirmationStatus\":%s,\"err\":null,\"memo\":null,\"signature\":\"%s\",\"slot\":%lu}",
+                           sig->ts/(long)1e9, block_flags_to_confirmation_status(sig->flags), buf64, sig->slot);
+    }
     fd_web_reply_sprintf(ws, "]},\"id\":%s}" CRLF, ctx->call_id);
 
   } FD_SCRATCH_SCOPE_END;
