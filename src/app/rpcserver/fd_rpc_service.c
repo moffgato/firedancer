@@ -285,8 +285,11 @@ read_slot_bank( fd_rpc_ctx_t * ctx, ulong slot, fd_valloc_t valloc ) {
 
   void * val = fd_funk_rec_query_xid_safe(funk, &recid, &xid, valloc, &vallen);
   if( FD_UNLIKELY( !val ) ) {
-    FD_LOG_WARNING(( "failed to decode slot_bank" ));
-    return NULL;
+    val = fd_funk_rec_query_safe(funk, &recid, valloc, &vallen);
+    if( FD_UNLIKELY( !val ) ) {
+      FD_LOG_WARNING(( "failed to decode slot_bank" ));
+      return NULL;
+    }
   }
   uint magic = *(uint*)val;
   fd_slot_bank_t * slot_bank = fd_valloc_malloc( valloc, fd_slot_bank_align(), fd_slot_bank_footprint() );
