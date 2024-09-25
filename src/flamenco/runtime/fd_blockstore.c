@@ -1317,11 +1317,12 @@ fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot,
 
     /* Copy out signatures */
     ulong i = 0;
+    uchar * data = fd_wksp_laddr_fast( wksp, block->data_gaddr );
     while( i < result_max && low + (long)i < (long)accts_cnt ) {
       fd_block_acct_sig_ref_t * ref = &accts[ low + (long)i ];
       if( fd_block_acct_sig_compare2( ref, &key ) != 0 ) break;
       fd_acct_sig_query_result_t * res = &result_out[ i ];
-      fd_memcpy( res->sig, (uchar const*)block + ref->id_off, FD_ED25519_SIG_SZ );
+      fd_memcpy( res->sig, data + ref->id_off, FD_ED25519_SIG_SZ );
       res->slot = slot;
       res->ts = query->ts;
       res->flags = query->flags;
