@@ -760,12 +760,6 @@ method_getEpochInfo(struct json_values* values, fd_rpc_ctx_t * ctx) {
       fd_method_error(ctx, -1, "unable to read epoch_bank");
       return 0;
     }
-    fd_slot_bank_t * slot_bank = read_slot_bank(ctx, slot, fd_scratch_virtual());
-    if( slot_bank == NULL ) {
-      fd_method_error(ctx, -1, "unable to read slot_bank");
-      fd_readwrite_end_read( &ctx->global->lock );
-      return 0;
-    }
     ulong slot_index;
     ulong epoch = fd_slot_to_epoch( &epoch_bank->epoch_schedule, slot, &slot_index );
     fd_block_map_t meta[1];
