@@ -1532,6 +1532,7 @@ method_getTransactionCount(struct json_values* values, fd_rpc_ctx_t * ctx) {
     fd_slot_bank_t *      slot_bank = read_slot_bank( ctx, slot, fd_scratch_virtual() );
     if( FD_UNLIKELY( !slot_bank ) ) {
       fd_method_error( ctx, -1, "slot bank %lu not found", slot );
+      fd_readwrite_end_read( &glob->lock );
       return 0;
     }
     fd_web_reply_sprintf( ws,
