@@ -760,6 +760,7 @@ method_getEpochInfo(struct json_values* values, fd_rpc_ctx_t * ctx) {
     fd_epoch_bank_t * epoch_bank = read_epoch_bank(ctx, slot, fd_scratch_virtual() );
     if( epoch_bank == NULL ) {
       fd_method_error(ctx, -1, "unable to read epoch_bank");
+      fd_readwrite_end_read( &ctx->global->lock );
       return 0;
     }
     fd_slot_bank_t * slot_bank = read_slot_bank(ctx, slot, fd_scratch_virtual());
@@ -797,6 +798,7 @@ method_getEpochSchedule(struct json_values* values, fd_rpc_ctx_t * ctx) {
     fd_epoch_bank_t * epoch_bank = read_epoch_bank(ctx, slot, fd_scratch_virtual() );
     if( FD_UNLIKELY( !epoch_bank ) ) {
       fd_web_error( ws, "unable to read epoch_bank" );
+      fd_readwrite_end_read( &ctx->global->lock );
       return 0;
     }
     fd_web_reply_sprintf(ws, "{\"jsonrpc\":\"2.0\",\"result\":{\"firstNormalEpoch\":%lu,\"firstNormalSlot\":%lu,\"leaderScheduleSlotOffset\":%lu,\"slotsPerEpoch\":%lu,\"warmup\":%s},\"id\":%s}" CRLF,
@@ -869,6 +871,7 @@ method_getGenesisHash(struct json_values* values, fd_rpc_ctx_t * ctx) {
     fd_epoch_bank_t * epoch_bank = read_epoch_bank(ctx, slot, fd_scratch_virtual());
     if( epoch_bank == NULL ) {
       fd_method_error(ctx, -1, "unable to read epoch_bank");
+      fd_readwrite_end_read( &ctx->global->lock );
       return 0;
     }
     fd_webserver_t * ws = &ctx->global->ws;
@@ -1039,6 +1042,7 @@ method_getMinimumBalanceForRentExemption(struct json_values* values, fd_rpc_ctx_
     fd_epoch_bank_t * epoch_bank  = read_epoch_bank( ctx, slot, fd_scratch_virtual() );
     if( epoch_bank == NULL ) {
       fd_method_error(ctx, -1, "unable to read epoch_bank");
+      fd_readwrite_end_read( &ctx->global->lock );
       return 0;
     }
     ulong min_balance = fd_rent_exempt_minimum_balance2(&epoch_bank->rent, sizen);
@@ -1584,6 +1588,7 @@ method_getVoteAccounts(struct json_values* values, fd_rpc_ctx_t * ctx) {
     fd_epoch_bank_t * epoch_bank = read_epoch_bank(ctx, slot, fd_scratch_virtual());
     if( epoch_bank == NULL ) {
       fd_method_error(ctx, -1, "unable to read epoch_bank");
+      fd_readwrite_end_read( &ctx->global->lock );
       return 0;
     }
 
