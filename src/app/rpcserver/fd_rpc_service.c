@@ -265,7 +265,6 @@ read_epoch_bank( fd_rpc_ctx_t * ctx, ulong slot, fd_valloc_t valloc ) {
   } FD_SCRATCH_SCOPE_END;
 }
 
-
 fd_slot_bank_t *
 read_slot_bank( fd_rpc_ctx_t * ctx, ulong slot, fd_valloc_t valloc ) {
   fd_funk_rec_key_t recid = fd_runtime_slot_bank_key();
@@ -311,7 +310,6 @@ read_slot_bank( fd_rpc_ctx_t * ctx, ulong slot, fd_valloc_t valloc ) {
   } else {
     FD_LOG_ERR(( "failed to read banks record: invalid magic number" ));
   }
-  fd_valloc_free( valloc, val );
   return slot_bank;
 }
 
