@@ -1285,6 +1285,7 @@ fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot,
     ulong blk_gaddr = query->block_gaddr;
     if( FD_UNLIKELY( !blk_gaddr ) ) return 0;
     fd_block_t * block = fd_wksp_laddr_fast( wksp, blk_gaddr );
+    if( FD_UNLIKELY( !block->data_gaddr ) ) return 0;
 
     if( FD_UNLIKELY( fd_readwrite_check_concur_read( &blockstore->lock, seqnum ) ) ) continue;
 
