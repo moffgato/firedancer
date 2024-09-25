@@ -1281,11 +1281,12 @@ fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot,
     uint seqnum;
     if( FD_UNLIKELY( fd_readwrite_start_concur_read( &blockstore->lock, &seqnum ) ) ) continue;
     fd_block_map_t const * query = fd_block_map_query_safe( slot_map, &slot, NULL );
-    if( FD_UNLIKELY( !query ) ) return 0;
+    if( FD_UNLIKELY( !query || !fd_uchar_extract_bit( query->flags, FD_BLOCK_FLAG_PROCESSED ) ) ) return 0;
     ulong blk_gaddr = query->block_gaddr;
     if( FD_UNLIKELY( !blk_gaddr ) ) return 0;
     fd_block_t * block = fd_wksp_laddr_fast( wksp, blk_gaddr );
-    if( FD_UNLIKELY( !block->data_gaddr ) ) return 0;
+    ulong data_gaddr = block->data_gaddr;
+    if( FD_UNLIKELY( !data_gaddr ) ) return 0;
 
     if( FD_UNLIKELY( fd_readwrite_check_concur_read( &blockstore->lock, seqnum ) ) ) continue;
 
@@ -1318,7 +1319,7 @@ fd_blockstore_acct_sig_query_volatile( fd_blockstore_t * blockstore, ulong slot,
 
     /* Copy out signatures */
     ulong i = 0;
-    uchar * data = fd_wksp_laddr_fast( wksp, block->data_gaddr );
+    uchar * data = fd_wksp_laddr_fast( wksp, data_gaddr );
     while( i < result_max && low + (long)i < (long)accts_cnt ) {
       fd_block_acct_sig_ref_t * ref = &accts[ low + (long)i ];
       if( fd_block_acct_sig_compare2( ref, &key ) != 0 ) break;
